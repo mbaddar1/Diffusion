@@ -1,3 +1,7 @@
+
+# Source of the repo 
+- https://github.com/Jmkernes/Diffusion
+- Author: Jonathan Kernes -> https://medium.com/@jmkernes
 # Generative diffusion models: theory + fundamentals
 
 [a sample training run](diffusion/ddpm/progression.png)

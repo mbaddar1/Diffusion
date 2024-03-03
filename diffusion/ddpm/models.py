@@ -7,12 +7,12 @@ class PositionalEncoding(nn.Module):
     """The classic positional encoding from the original Attention papers"""
 
     def __init__(
-        self,
-        d_model: int = 128,
-        maxlen: int = 1024,
-        min_freq: float = 1e-4,
-        device: str = "cpu",
-        dtype=torch.float32,
+            self,
+            d_model: int = 128,
+            maxlen: int = 1024,
+            min_freq: float = 1e-4,
+            device: str = "cpu",
+            dtype=torch.float32,
     ):
         """
         Args:
@@ -94,3 +94,16 @@ class BasicDiscreteTimeModel(nn.Module):
         for block in self.blocks:
             x = block(x, t)
         return self.lin_out(x)
+
+
+class NaiveNeuralNetworkNoiseModel(nn.Module):
+    def __init__(self, time_steps: int, hidden_dim: int = 64, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.time_steps = time_steps
+        self.model = nn.Sequential(nn.Linear(2 + 1, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 2))
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        t_norm = (t / float(self.time_steps)).reshape(-1, 1)
+        x_aug = torch.cat([x, t_norm], dim=1)
+        out = self.model(x_aug)
+        return out

@@ -1,7 +1,7 @@
 import os
 
 from Diffusion.diffusion.ddpm.diffusers import DDPM
-from Diffusion.diffusion.ddpm.models import BasicDiscreteTimeModel
+from Diffusion.diffusion.ddpm.models import BasicDiscreteTimeModel, NaiveNeuralNetworkNoiseModel
 
 # not sure if this is necessary
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
@@ -19,7 +19,6 @@ from matplotlib import animation
 from fire import Fire
 from tqdm import tqdm
 from pydantic import BaseModel
-
 
 class TrainResult(BaseModel):
     losses: List[float]
@@ -98,7 +97,8 @@ def main(
         seed: int = 42,
 ):
     print("Creating model")
-    model = BasicDiscreteTimeModel(d_model=d_model, n_layers=n_layers)
+    # model = BasicDiscreteTimeModel(d_model=d_model, n_layers=n_layers)
+    model = NaiveNeuralNetworkNoiseModel(time_steps=n_steps)
     ddpm = DDPM(n_steps=n_steps)
 
     print("Training")

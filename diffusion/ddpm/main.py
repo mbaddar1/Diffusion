@@ -1,24 +1,22 @@
 import os
-
 from Diffusion.diffusion.ddpm.diffusers import DDPM
 from Diffusion.diffusion.ddpm.models import BasicDiscreteTimeModel, NaiveNeuralNetworkNoiseModel
-
-# not sure if this is necessary
-os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-
 from typing import Any, List
 from pathlib import Path
-
 import numpy as np
 import torch
 from torch import nn
 from sklearn.datasets import make_swiss_roll
 import matplotlib.pyplot as plt
 from matplotlib import animation
-
 from fire import Fire
 from tqdm import tqdm
 from pydantic import BaseModel
+
+
+# not sure if this is necessary
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+
 
 class TrainResult(BaseModel):
     losses: List[float]
@@ -87,9 +85,10 @@ def animate(samples: List[Any], save: bool = True):
 
 
 def main(
-        n_steps: int = 100,
-        d_model: int = 128,
-        n_layers: int = 2,
+        noise_model_name: str,
+        time_steps: int = 100,
+        hidden_dim_model: int = 128,
+        num_layers: int = 2,
         batch_size: int = 128,
         n_epochs: int = 400,
         sample_size: int = 512,
@@ -97,13 +96,20 @@ def main(
         seed: int = 42,
 ):
     print("Creating model")
-    # model = BasicDiscreteTimeModel(d_model=d_model, n_layers=n_layers)
-    model = NaiveNeuralNetworkNoiseModel(time_steps=n_steps)
-    ddpm = DDPM(n_steps=n_steps)
+    noise_model = None
+    if noise_model_name == "basic_discrete_time":
+        noise_model = BasicDiscreteTimeModel(hidden_model_dim=hidden_dim_model, num_resnet_layers=num_layers)
+    elif noise_model_name == "naive_nn":
+        noise_model = NaiveNeuralNetworkNoiseModel(time_steps=time_steps)
+    else:
+        raise ValueError(f"Unsupported noise_model_name = {noise_model_name}")
+    print(f"Using noise_model = {noise_model_name}")
+    print(f"Type of noise_model instance : {type(noise_model)}")
+    ddpm = DDPM(n_steps=time_steps)
 
     print("Training")
     result = train(
-        model=model,
+        model=noise_model,
         ddpm=ddpm,
         batch_size=batch_size,
         n_epochs=n_epochs,

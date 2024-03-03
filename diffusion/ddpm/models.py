@@ -79,14 +79,14 @@ class DiscreteTimeResidualBlock(nn.Module):
 
 
 class BasicDiscreteTimeModel(nn.Module):
-    def __init__(self, d_model: int = 128, n_layers: int = 2):
+    def __init__(self, hidden_model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2):
         super().__init__()
-        self.d_model = d_model
-        self.n_layers = n_layers
-        self.lin_in = nn.Linear(2, d_model)
-        self.lin_out = nn.Linear(d_model, 2)
-        self.blocks = nn.ParameterList(
-            [DiscreteTimeResidualBlock(d_model=d_model) for _ in range(n_layers)]
+        self.d_model = hidden_model_dim
+        self.n_layers = num_resnet_layers
+        self.lin_in = nn.Linear(data_dim, hidden_model_dim)
+        self.lin_out = nn.Linear(hidden_model_dim, data_dim)
+        self.blocks = nn.ModuleList(
+            [DiscreteTimeResidualBlock(d_model=hidden_model_dim) for _ in range(num_resnet_layers)]
         )
 
     def forward(self, x, t):

@@ -14,7 +14,6 @@ from fire import Fire
 from tqdm import tqdm
 from pydantic import BaseModel
 
-
 from statistical_distance.layers import SinkhornDistance
 
 # not sure if this is necessary
@@ -154,9 +153,9 @@ def main(
         hidden_dim_model: int = 128,
         num_layers: int = 2,
         batch_size: int = 128,
-        n_epochs: int = 400,
+        n_epochs: int = 500,
         sample_size: int = 512,
-        steps_between_sampling: int = 500,
+        steps_between_sampling: int = 50,
         seed: int = 42,
 ):
     device = torch.device("cuda")

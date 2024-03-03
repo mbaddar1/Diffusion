@@ -1,5 +1,8 @@
 import os
 
+from Diffusion.diffusion.ddpm.diffusers import DDPM
+from Diffusion.diffusion.ddpm.models import BasicDiscreteTimeModel
+
 # not sure if this is necessary
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
@@ -17,23 +20,20 @@ from fire import Fire
 from tqdm import tqdm
 from pydantic import BaseModel
 
-from diffusion.ddpm.diffusers import DDPM
-from diffusion.ddpm.models import BasicDiscreteTimeModel
-
 
 class TrainResult(BaseModel):
-    losses: List[int]
+    losses: List[float]
     samples: List[Any]
 
 
 def train(
-    model: nn.Module,
-    ddpm: DDPM,
-    batch_size: int = 128,
-    n_epochs: int = 400,
-    sample_size: int = 512,
-    steps_between_sampling: int = 20,
-    seed: int = 42,
+        model: nn.Module,
+        ddpm: DDPM,
+        batch_size: int = 128,
+        n_epochs: int = 400,
+        sample_size: int = 512,
+        steps_between_sampling: int = 20,
+        seed: int = 42,
 ) -> TrainResult:
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -53,7 +53,7 @@ def train(
         for _ in range(n_epochs):
             ids = np.random.choice(N, N, replace=False)
             for i in range(0, len(ids), batch_size):
-                x = torch.tensor(X[ids[i : i + batch_size]], dtype=torch.float32)
+                x = torch.tensor(X[ids[i: i + batch_size]], dtype=torch.float32)
                 optim.zero_grad()
                 loss = ddpm.diffusion_loss(model, x)
                 loss.backward()
@@ -88,14 +88,14 @@ def animate(samples: List[Any], save: bool = True):
 
 
 def main(
-    n_steps: int = 100,
-    d_model: int = 128,
-    n_layers: int = 2,
-    batch_size: int = 128,
-    n_epochs: int = 400,
-    sample_size: int = 512,
-    steps_between_sampling: int = 20,
-    seed: int = 42,
+        n_steps: int = 100,
+        d_model: int = 128,
+        n_layers: int = 2,
+        batch_size: int = 128,
+        n_epochs: int = 400,
+        sample_size: int = 512,
+        steps_between_sampling: int = 20,
+        seed: int = 42,
 ):
     print("Creating model")
     model = BasicDiscreteTimeModel(d_model=d_model, n_layers=n_layers)

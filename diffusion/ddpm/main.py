@@ -24,7 +24,7 @@ logger = logging.getLogger()
 
 
 class TrainResult(BaseModel):
-    losses: List[float]
+    ema_losses: List[float]
     samples: List[Any]
     sinkhorn_benchmark_value: float
     sinkhorn_values: List[Tuple[int, float]]
@@ -35,9 +35,9 @@ def train(
         ddpm: DDPM,
         device: torch.device,
         batch_size: int = 128,
-        n_epochs: int = 400,
+        n_epochs: int = 1000,
         sample_size: int = 512,
-        steps_between_sampling: int = 200,
+        steps_between_sampling: int = 500,
         seed: int = 42) -> TrainResult:
     """
 
@@ -52,10 +52,11 @@ def train(
 
     optim = torch.optim.Adam(noise_model.parameters(), 1e-3)
     sinkhorn_calculator = SinkhornDistance(eps=0.1, max_iter=100, device=device)
-    losses: List[float] = []
+    ema_losses: List[float] = []
     samples: List[Any] = []
     step = 0
-    avg_loss = None  # exponential moving average
+    ema_loss = None  # exponential moving average
+    ema_loss_alpha = 0.01
     # Set bench-mark sinkhorn value for this dataset
     logger.info(f"Setting benchmark sinkhorn value")
     sinkhorn_benchmark_sample_size = sample_size * 4
@@ -68,9 +69,13 @@ def train(
     sinkhorn_benchmark_value = sinkhorn_calculator(X_ref_1, X_ref_2)[0].item()
     logger.info(f"*** Benchmark sinkhorn value = {sinkhorn_benchmark_value} ***")
     sinkhorn_values = []
-    with tqdm(total=n_epochs * (len(X) // batch_size)) as pbar:
+    # total number of train loop iterations = number of batches * num_epochs
+    # i.e. the loop will touch each batch n_epoch times
+    num_batches = len(X) // batch_size
+    n_iter = n_epochs * num_batches
+    with tqdm(total=n_iter) as pbar:
         for _ in range(n_epochs):
-            ids = np.random.choice(N, N, replace=False)
+            ids = np.random.choice(N, N, replace=False)  # shuffling
             for i in range(0, len(ids), batch_size):
                 x = torch.tensor(X[ids[i: i + batch_size]], dtype=torch.float32, device=device)
                 optim.zero_grad()
@@ -79,13 +84,13 @@ def train(
                 optim.step()
 
                 pbar.update(1)
-                losses.append(loss.item())
-                if avg_loss is None:
-                    avg_loss = losses[-1]
+                ema_losses.append(loss.item())
+                if ema_loss is None:
+                    ema_loss = ema_losses[-1]
                 else:
-                    avg_loss = 0.95 * avg_loss + 0.05 * losses[-1]
+                    ema_loss = (1 - ema_loss_alpha) * ema_loss + ema_loss_alpha * loss.item()
                 if not step % 10:
-                    pbar.set_description(f"Iter: {step}. Average Loss: {avg_loss:.04f}")
+                    pbar.set_description(f"Iter: {step}. EMA Loss: {ema_loss:.04f}")
                 if not step % steps_between_sampling:
                     generated_sample = ddpm.sample(noise_model, n_samples=sample_size)
                     samples.append(ddpm.sample(noise_model, n_samples=sample_size))
@@ -96,8 +101,32 @@ def train(
                     logger.info(f"At step = {step}, sinkhorn_value = {sinkhorn_value}")
                     sinkhorn_values.append((step, sinkhorn_value))
                 step += 1
-    return TrainResult(losses=losses, samples=samples, sinkhorn_benchmark_value=sinkhorn_benchmark_value,
+    return TrainResult(ema_losses=ema_losses, samples=samples, sinkhorn_benchmark_value=sinkhorn_benchmark_value,
                        sinkhorn_values=sinkhorn_values)
+
+
+def plot_metrics(result: TrainResult):
+    # plot losses
+    x = list(range(len(result.ema_losses)))
+    plt.xlabel("Iterations")
+    plt.ylabel("EMA loss")
+    plt.title("Loss-Iterations curve")
+    plt.plot(x, result.ema_losses)
+    plt.savefig("iter_loss.png")
+
+    plt.clf()
+
+    # plot sinkhorn
+    x = [item[0] for item in result.sinkhorn_values]
+    y1 = [result.sinkhorn_benchmark_value] * len(x)
+    y2 = [item[1] for item in result.sinkhorn_values]
+    plt.plot(x, y1, '--', label="Benchmark")
+    plt.plot(x, y2, '-', label="Model values")
+    plt.xlabel("iterations")
+    plt.ylabel("Sinkhorn values")
+    plt.legend(loc="upper right")
+    plt.savefig("iter_sinkhorn.png")
+    plt.clf()  # clearing figure buffer for any future plotting
 
 
 def animate(samples: List[Any], save: bool = True):
@@ -113,6 +142,7 @@ def animate(samples: List[Any], save: bool = True):
     anim = animation.FuncAnimation(fig, animate, interval=100, frames=len(samples) - 1)
     if save:
         anim.save(filename="animation.gif", writer=animation.PillowWriter(fps=5))
+    plt.clf()
     return anim
 
 
@@ -124,7 +154,7 @@ def main(
         batch_size: int = 128,
         n_epochs: int = 400,
         sample_size: int = 512,
-        steps_between_sampling: int = 200,
+        steps_between_sampling: int = 500,
         seed: int = 42,
 ):
     device = torch.device("cuda")
@@ -155,6 +185,7 @@ def main(
     path = Path(__file__).parent / "animation.gif"
     logger.info(f"Animating and saving to {path}")
     animate(result.samples)
+    plot_metrics(result)
 
 
 if __name__ == "__main__":

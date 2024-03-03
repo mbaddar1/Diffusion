@@ -1,18 +1,22 @@
+import logging
+
 import torch
 from torch import nn
 import numpy as np
+
+logger = logging.getLogger()
 
 
 class PositionalEncoding(nn.Module):
     """The classic positional encoding from the original Attention papers"""
 
     def __init__(
-        self,
-        d_model: int = 128,
-        maxlen: int = 1024,
-        min_freq: float = 1e-4,
-        device: str = "cpu",
-        dtype=torch.float32,
+            self,
+            d_model: int = 128,
+            maxlen: int = 1024,
+            min_freq: float = 1e-4,
+            device: str = "cpu",
+            dtype=torch.float32,
     ):
         """
         Args:
@@ -79,14 +83,14 @@ class DiscreteTimeResidualBlock(nn.Module):
 
 
 class BasicDiscreteTimeModel(nn.Module):
-    def __init__(self, d_model: int = 128, n_layers: int = 2):
+    def __init__(self, hidden_model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2):
         super().__init__()
-        self.d_model = d_model
-        self.n_layers = n_layers
-        self.lin_in = nn.Linear(2, d_model)
-        self.lin_out = nn.Linear(d_model, 2)
-        self.blocks = nn.ParameterList(
-            [DiscreteTimeResidualBlock(d_model=d_model) for _ in range(n_layers)]
+        self.d_model = hidden_model_dim
+        self.n_layers = num_resnet_layers
+        self.lin_in = nn.Linear(data_dim, hidden_model_dim)
+        self.lin_out = nn.Linear(hidden_model_dim, data_dim)
+        self.blocks = nn.ModuleList(
+            [DiscreteTimeResidualBlock(d_model=hidden_model_dim) for _ in range(num_resnet_layers)]
         )
 
     def forward(self, x, t):
@@ -94,3 +98,16 @@ class BasicDiscreteTimeModel(nn.Module):
         for block in self.blocks:
             x = block(x, t)
         return self.lin_out(x)
+
+
+class NaiveNeuralNetworkNoiseModel(nn.Module):
+    def __init__(self, time_steps: int, hidden_dim: int = 64, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.time_steps = time_steps
+        self.model = nn.Sequential(nn.Linear(2 + 1, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 2))
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        t_norm = (t / float(self.time_steps)).reshape(-1, 1)
+        x_aug = torch.cat([x, t_norm], dim=1)
+        out = self.model(x_aug)
+        return out

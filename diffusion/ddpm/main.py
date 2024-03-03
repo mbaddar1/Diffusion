@@ -1,40 +1,46 @@
+import logging
 import os
-
 from Diffusion.diffusion.ddpm.diffusers import DDPM
-from Diffusion.diffusion.ddpm.models import BasicDiscreteTimeModel
-
-# not sure if this is necessary
-os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-
-from typing import Any, List
+from Diffusion.diffusion.ddpm.models import BasicDiscreteTimeModel, NaiveNeuralNetworkNoiseModel
+from typing import Any, List, Tuple
 from pathlib import Path
-
 import numpy as np
 import torch
 from torch import nn
 from sklearn.datasets import make_swiss_roll
 import matplotlib.pyplot as plt
 from matplotlib import animation
-
 from fire import Fire
 from tqdm import tqdm
 from pydantic import BaseModel
 
+from statistical_distance.layers import SinkhornDistance
+
+# not sure if this is necessary
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+
 
 class TrainResult(BaseModel):
-    losses: List[float]
+    ema_losses: List[float]
     samples: List[Any]
+    sinkhorn_benchmark_value: float
+    sinkhorn_values: List[Tuple[int, float]]
 
 
 def train(
-        model: nn.Module,
+        noise_model: nn.Module,
         ddpm: DDPM,
+        device: torch.device,
         batch_size: int = 128,
-        n_epochs: int = 400,
+        n_epochs: int = 1000,
         sample_size: int = 512,
-        steps_between_sampling: int = 20,
-        seed: int = 42,
-) -> TrainResult:
+        steps_between_sampling: int = 500,
+        seed: int = 42) -> TrainResult:
+    """
+
+    """
     np.random.seed(seed)
     torch.manual_seed(seed)
 
@@ -43,68 +49,133 @@ def train(
     N = 1 << 10
     X = make_swiss_roll(n_samples=N, noise=1e-1)[0][:, [0, 2]] / 10.0
 
-    optim = torch.optim.Adam(model.parameters(), 1e-3)
-
-    losses: List[float] = []
+    optim = torch.optim.Adam(noise_model.parameters(), 1e-3)
+    sinkhorn_calculator = SinkhornDistance(eps=0.1, max_iter=100, device=device)
+    ema_losses: List[float] = []
     samples: List[Any] = []
     step = 0
-    avg_loss = None  # exponential moving average
-    with tqdm(total=n_epochs * (len(X) // batch_size)) as pbar:
+    ema_loss = None  # exponential moving average
+    ema_loss_alpha = 0.01
+    # Set bench-mark sinkhorn value for this dataset
+    logger.info(f"Setting benchmark sinkhorn value")
+    sinkhorn_benchmark_sample_size = sample_size * 4
+    X_ref_1 = torch.tensor(make_swiss_roll(n_samples=sinkhorn_benchmark_sample_size, noise=1e-1)[0][:, [0, 2]] / 10.0,
+                           device=device)
+    X_ref_2 = torch.tensor(make_swiss_roll(n_samples=sinkhorn_benchmark_sample_size, noise=1e-1)[0][:, [0, 2]] / 10.0,
+                           device=device)
+    diff_norm = torch.norm(X_ref_1 - X_ref_2)
+    logger.info(f"Norm of diff between two reference sample = {diff_norm}")
+    sinkhorn_benchmark_value = sinkhorn_calculator(X_ref_1, X_ref_2)[0].item()
+    logger.info(f"*** Benchmark sinkhorn value = {sinkhorn_benchmark_value} ***")
+    sinkhorn_values = []
+    # total number of train loop iterations = number of batches * num_epochs
+    # i.e. the loop will touch each batch n_epoch times
+    num_batches = len(X) // batch_size
+    n_iter = n_epochs * num_batches
+    with tqdm(total=n_iter) as pbar:
         for _ in range(n_epochs):
-            ids = np.random.choice(N, N, replace=False)
+            ids = np.random.choice(N, N, replace=False)  # shuffling
             for i in range(0, len(ids), batch_size):
-                x = torch.tensor(X[ids[i: i + batch_size]], dtype=torch.float32)
+                x = torch.tensor(X[ids[i: i + batch_size]], dtype=torch.float32, device=device)
                 optim.zero_grad()
-                loss = ddpm.diffusion_loss(model, x)
+                loss = ddpm.diffusion_loss(noise_model, x)
                 loss.backward()
                 optim.step()
 
                 pbar.update(1)
-                losses.append(loss.item())
-                if avg_loss is None:
-                    avg_loss = losses[-1]
+                ema_losses.append(loss.item())
+                if ema_loss is None:
+                    ema_loss = ema_losses[-1]
                 else:
-                    avg_loss = 0.95 * avg_loss + 0.05 * losses[-1]
+                    ema_loss = (1 - ema_loss_alpha) * ema_loss + ema_loss_alpha * loss.item()
                 if not step % 10:
-                    pbar.set_description(f"Iter: {step}. Average Loss: {avg_loss:.04f}")
+                    pbar.set_description(f"Iter: {step}. EMA Loss: {ema_loss:.04f}")
                 if not step % steps_between_sampling:
-                    samples.append(ddpm.sample(model, n_samples=sample_size))
+                    generated_sample = ddpm.sample(noise_model, n_samples=sample_size)
+                    samples.append(ddpm.sample(noise_model, n_samples=sample_size))
+                    # add sinkhorn eval
+                    ref_sample = torch.tensor(make_swiss_roll(n_samples=sample_size, noise=1e-1)[0][:, [0, 2]] / 10.0,
+                                              dtype=generated_sample.dtype, device=device)
+                    sinkhorn_value = sinkhorn_calculator(generated_sample, ref_sample)[0].item()
+                    logger.info(f"At step = {step}, sinkhorn_value = {sinkhorn_value}")
+                    sinkhorn_values.append((step, sinkhorn_value))
                 step += 1
-    return TrainResult(losses=losses, samples=samples)
+    return TrainResult(ema_losses=ema_losses, samples=samples, sinkhorn_benchmark_value=sinkhorn_benchmark_value,
+                       sinkhorn_values=sinkhorn_values)
 
 
+def plot_metrics(result: TrainResult):
+    # plot losses
+    x = list(range(len(result.ema_losses)))
+    plt.xlabel("Iterations")
+    plt.ylabel("EMA loss")
+    plt.title("Loss-Iterations curve")
+    plt.plot(x, result.ema_losses)
+    plt.savefig("iter_loss.png")
+
+    plt.clf()
+
+    # plot sinkhorn
+    x = [item[0] for item in result.sinkhorn_values]
+    y1 = [result.sinkhorn_benchmark_value] * len(x)
+    y2 = [item[1] for item in result.sinkhorn_values]
+    plt.plot(x, y1, '--', label="Benchmark")
+    plt.plot(x, y2, '-', label="Model values")
+    plt.xlabel("iterations")
+    plt.ylabel("Sinkhorn values")
+    plt.legend(loc="upper right")
+    plt.savefig("iter_sinkhorn.png")
+    plt.clf()  # clearing figure buffer for any future plotting
+
+"""
+Animation func
+"""
 def animate(samples: List[Any], save: bool = True):
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set(xlim=(-2.0, 2.0), ylim=(-2.0, 2.0))
-    scat = ax.scatter(*samples[0].detach().numpy().T, c="k", alpha=0.3)
+    first_sample = samples[0].detach().cpu().numpy().T
+    scat = ax.scatter(*first_sample, c="k", alpha=0.3)
 
     def animate(i):
-        scat.set_offsets(samples[i].detach().numpy())
+        offsets = samples[i].detach().cpu().numpy()
+        scat.set_offsets(offsets)
 
     anim = animation.FuncAnimation(fig, animate, interval=100, frames=len(samples) - 1)
     if save:
         anim.save(filename="animation.gif", writer=animation.PillowWriter(fps=5))
+    plt.clf()
     return anim
 
 
 def main(
-        n_steps: int = 100,
-        d_model: int = 128,
-        n_layers: int = 2,
+        noise_model_name: str,
+        time_steps: int = 100,
+        hidden_dim_model: int = 128,
+        num_layers: int = 2,
         batch_size: int = 128,
-        n_epochs: int = 400,
+        n_epochs: int = 500,
         sample_size: int = 512,
-        steps_between_sampling: int = 20,
+        steps_between_sampling: int = 50,
         seed: int = 42,
 ):
-    print("Creating model")
-    model = BasicDiscreteTimeModel(d_model=d_model, n_layers=n_layers)
-    ddpm = DDPM(n_steps=n_steps)
+    device = torch.device("cuda")
+    logger.info("Creating model")
+    noise_model = None
+    if noise_model_name == "basic_discrete_time":
+        noise_model = BasicDiscreteTimeModel(hidden_model_dim=hidden_dim_model, num_resnet_layers=num_layers).to(device)
+    elif noise_model_name == "naive_nn":
+        noise_model = NaiveNeuralNetworkNoiseModel(time_steps=time_steps).to(device)
+    else:
+        raise ValueError(f"Unsupported noise_model_name = {noise_model_name}")
+    logger.info(f"Using noise_model = {noise_model_name}")
+    logger.info(f"Type of noise_model instance : {type(noise_model)}")
+    ddpm = DDPM(n_steps=time_steps).to(device)
 
-    print("Training")
+    logger.info("Training")
     result = train(
-        model=model,
+        noise_model=noise_model,
         ddpm=ddpm,
+        device=device,
         batch_size=batch_size,
         n_epochs=n_epochs,
         sample_size=sample_size,
@@ -113,8 +184,9 @@ def main(
     )
 
     path = Path(__file__).parent / "animation.gif"
-    print(f"Animating and saving to {path}")
+    logger.info(f"Animating and saving to {path}")
     animate(result.samples)
+    plot_metrics(result)
 
 
 if __name__ == "__main__":

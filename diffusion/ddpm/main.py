@@ -128,7 +128,9 @@ def plot_metrics(result: TrainResult):
     plt.savefig("iter_sinkhorn.png")
     plt.clf()  # clearing figure buffer for any future plotting
 
-
+"""
+Animation func
+"""
 def animate(samples: List[Any], save: bool = True):
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set(xlim=(-2.0, 2.0), ylim=(-2.0, 2.0))

@@ -65,7 +65,7 @@ class DDPM(nn.Module):
                 abar = self.alpha_bar[t].repeat(n_samples)[:, None]
 
                 # deterministic trajectory. eps_theta is similar to the Force on the particle
-                eps_theta = model(x, torch.tensor([t] * n_samples, dtype=torch.long))
+                eps_theta = model(x, torch.tensor([t] * n_samples, dtype=torch.long,device=device))
                 x_mean = (x - eps_theta * (1 - a) / torch.sqrt(1 - abar)) / torch.sqrt(
                     a
                 )

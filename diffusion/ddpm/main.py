@@ -91,11 +91,12 @@ def train(
                 if not step % 10:
                     pbar.set_description(f"Iter: {step}. EMA Loss: {ema_loss:.04f}")
                 if not step % steps_between_sampling:
-                    generated_sample = ddpm.sample(noise_model, n_samples=sample_size)
-                    samples.append(ddpm.sample(noise_model, n_samples=sample_size))
+                    generated_sample = ddpm.sample(noise_model, n_samples=sinkhorn_benchmark_sample_size)
+                    samples.append(generated_sample)
                     # add sinkhorn eval
-                    ref_sample = torch.tensor(make_swiss_roll(n_samples=sample_size, noise=1e-1)[0][:, [0, 2]] / 10.0,
-                                              dtype=generated_sample.dtype, device=device)
+                    ref_sample = torch.tensor(
+                        make_swiss_roll(n_samples=sinkhorn_benchmark_sample_size, noise=1e-1)[0][:, [0, 2]] / 10.0,
+                        dtype=generated_sample.dtype, device=device)
                     sinkhorn_value = sinkhorn_calculator(generated_sample, ref_sample)[0].item()
                     logger.info(f"At step = {step}, sinkhorn_value = {sinkhorn_value}")
                     sinkhorn_values.append((step, sinkhorn_value))
@@ -104,14 +105,14 @@ def train(
                        sinkhorn_values=sinkhorn_values)
 
 
-def plot_metrics(result: TrainResult):
+def plot_metrics(result: TrainResult, noise_model_name: str):
     # plot losses
     x = list(range(len(result.ema_losses)))
     plt.xlabel("Iterations")
-    plt.ylabel("EMA loss")
+    plt.ylabel("EMA loss - Log scale")
     plt.title("Loss-Iterations curve")
-    plt.plot(x, result.ema_losses)
-    plt.savefig("iter_loss.png")
+    plt.plot(x, np.log(result.ema_losses))
+    plt.savefig(f"iter_loss_noise_model_{noise_model_name}.png")
 
     plt.clf()
 
@@ -119,18 +120,19 @@ def plot_metrics(result: TrainResult):
     x = [item[0] for item in result.sinkhorn_values]
     y1 = [result.sinkhorn_benchmark_value] * len(x)
     y2 = [item[1] for item in result.sinkhorn_values]
-    plt.plot(x, y1, '--', label="Benchmark")
-    plt.plot(x, y2, '-', label="Model values")
+    max_log_y = np.maximum(max(np.log(y1)), max(np.log(y2)))
+    plt.plot(x, np.log(y1), '--', label="Benchmark")
+    plt.plot(x, np.log(y2), '-', label="Model values")
+    # plt.yticks(list(np.arange(0, max_log_y + 1, 0.05)))
     plt.xlabel("iterations")
-    plt.ylabel("Sinkhorn values")
+    plt.ylabel("Sinkhorn Values - Log Scale")
     plt.legend(loc="upper right")
-    plt.savefig("iter_sinkhorn.png")
+    plt.grid()
+    plt.savefig(f"iter_sinkhorn_noise_model_{noise_model_name}.png")
     plt.clf()  # clearing figure buffer for any future plotting
 
-"""
-Animation func
-"""
-def animate(samples: List[Any], save: bool = True):
+
+def animate(samples: List[Any], noise_model_name: str, save: bool = True):
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set(xlim=(-2.0, 2.0), ylim=(-2.0, 2.0))
     first_sample = samples[0].detach().cpu().numpy().T
@@ -142,7 +144,7 @@ def animate(samples: List[Any], save: bool = True):
 
     anim = animation.FuncAnimation(fig, animate, interval=100, frames=len(samples) - 1)
     if save:
-        anim.save(filename="animation.gif", writer=animation.PillowWriter(fps=5))
+        anim.save(filename=f"animation_noise_model_{noise_model_name}.gif", writer=animation.PillowWriter(fps=5))
     plt.clf()
     return anim
 
@@ -153,7 +155,7 @@ def main(
         hidden_dim_model: int = 128,
         num_layers: int = 2,
         batch_size: int = 128,
-        n_epochs: int = 500,
+        n_epochs: int = 1000,
         sample_size: int = 512,
         steps_between_sampling: int = 50,
         seed: int = 42,
@@ -185,8 +187,8 @@ def main(
 
     path = Path(__file__).parent / "animation.gif"
     logger.info(f"Animating and saving to {path}")
-    animate(result.samples)
-    plot_metrics(result)
+    animate(samples=result.samples, noise_model_name=noise_model_name)
+    plot_metrics(result=result, noise_model_name=noise_model_name)
 
 
 if __name__ == "__main__":

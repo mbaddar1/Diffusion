@@ -12,7 +12,7 @@ class PositionalEncoding(nn.Module):
 
     def __init__(
             self,
-            d_model: int = 128,
+            model_dim: int = 128,
             maxlen: int = 1024,
             min_freq: float = 1e-4,
             device: str = "cpu",
@@ -20,21 +20,21 @@ class PositionalEncoding(nn.Module):
     ):
         """
         Args:
-            d_model (int, optional): embedding dimension of each token. Defaults to 128.
+            model_dim (int, optional): embedding dimension of each token. Defaults to 128.
             maxlen (int, optional): maximum sequence length. Defaults to 1024.
             min_freq (float, optional): use the magic 1/10,000 value! Defaults to 1e-4.
             device (str, optional): accelerator or nah. Defaults to "cpu".
             dtype (_type_, optional): torch dtype. Defaults to torch.float32.
         """
         super().__init__()
-        pos_enc = self._get_pos_enc(d_model=d_model, maxlen=maxlen, min_freq=min_freq)
+        pos_enc = self._get_pos_enc(model_dim=model_dim, maxlen=maxlen, min_freq=min_freq)
         self.register_buffer(
             "pos_enc", torch.tensor(pos_enc, dtype=dtype, device=device)
         )
 
-    def _get_pos_enc(self, d_model: int, maxlen: int, min_freq: float):
+    def _get_pos_enc(self, model_dim: int, maxlen: int, min_freq: float):
         position = np.arange(maxlen)
-        freqs = min_freq ** (2 * (np.arange(d_model) // 2) / d_model)
+        freqs = min_freq ** (2 * (np.arange(model_dim) // 2) / model_dim)
         pos_enc = position[:, None] * freqs[None]
         pos_enc[:, ::2] = np.cos(pos_enc[:, ::2])
         pos_enc[:, 1::2] = np.sin(pos_enc[:, 1::2])
@@ -69,29 +69,38 @@ class DiscreteTimeResidualBlock(nn.Module):
     """Generic block to learn a nonlinear function f(x, t), where
     t is discrete and x is continuous."""
 
-    def __init__(self, d_model: int, maxlen: int = 512):
+    def __init__(self, model_dim: int, maxlen: int = 512, with_time_emb: bool = True):
         super().__init__()
-        self.d_model = d_model
-        self.emb = PositionalEncoding(d_model=d_model, maxlen=maxlen)
-        self.lin1 = nn.Linear(d_model, d_model)
-        self.lin2 = nn.Linear(d_model, d_model)
-        self.norm = nn.LayerNorm(d_model)
+        self.model_dim = model_dim
+        self.emb = PositionalEncoding(model_dim=model_dim, maxlen=maxlen)
+        self.lin1 = nn.Linear(model_dim, model_dim)
+        self.lin2 = nn.Linear(model_dim, model_dim)
+        self.norm = nn.LayerNorm(model_dim)
         self.act = nn.GELU()
+        self.with_time_emb = with_time_emb
 
     def forward(self, x, t):
-        return self.norm(x + self.lin2(self.act(self.lin1(x + self.emb(t)))))
+
+        if self.with_time_emb:
+            t_emb = self.emb(t)
+            x_input = x + t_emb
+        else:
+            x_input = x
+        return self.norm(x + self.lin2(self.act(self.lin1(x_input))))
 
 
 class BasicDiscreteTimeModel(nn.Module):
-    def __init__(self, hidden_model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2):
+    def __init__(self, model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2, with_time_emb: bool = True):
         super().__init__()
-        self.d_model = hidden_model_dim
+        self.model_dim = model_dim
         self.n_layers = num_resnet_layers
-        self.lin_in = nn.Linear(data_dim, hidden_model_dim)
-        self.lin_out = nn.Linear(hidden_model_dim, data_dim)
+        self.lin_in = nn.Linear(data_dim, model_dim)
+        self.lin_out = nn.Linear(model_dim, data_dim)
         self.blocks = nn.ModuleList(
-            [DiscreteTimeResidualBlock(d_model=hidden_model_dim) for _ in range(num_resnet_layers)]
+            [DiscreteTimeResidualBlock(model_dim=model_dim, with_time_emb=with_time_emb) for _ in
+             range(num_resnet_layers)]
         )
+        logger.info(f"with_time_embedding ? {with_time_emb}")
 
     def forward(self, x, t):
         x = self.lin_in(x)

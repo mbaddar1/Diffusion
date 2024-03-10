@@ -105,7 +105,7 @@ def train(
                        sinkhorn_values=sinkhorn_values)
 
 
-def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool):
+def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool, activation_name: str):
     # plot losses
 
     x = list(range(len(result.ema_losses)))
@@ -115,7 +115,8 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
     plt.plot(x, np.log(result.ema_losses))
 
     if noise_model_name == "basic_discrete_time":
-        outfile_name = f"iter_loss_noise_model_{noise_model_name}_with_time_emb_{with_time_emb}.png"
+        outfile_name = (f"iter_loss_noise_model_{noise_model_name}_activation_{activation_name}"
+                        f"_with_time_emb_{with_time_emb}.png")
     elif noise_model_name == "naive_nn":
         outfile_name = f"iter_loss_noise_model_{noise_model_name}.png"
     else:
@@ -138,7 +139,8 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
     plt.grid()
 
     if noise_model_name == "basic_discrete_time":
-        outfile_name = f"iter_sinkhorn_noise_model_{noise_model_name}_with_time_emb_{with_time_emb}.png"
+        outfile_name = (f"iter_sinkhorn_noise_model_{noise_model_name}_activation_"
+                        f"{activation_name}_with_time_emb_{with_time_emb}.png")
     elif noise_model_name == "naive_nn":
         outfile_name = f"iter_sinkhorn_noise_model_{noise_model_name}.png"
     else:
@@ -147,7 +149,7 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
     plt.clf()  # clearing figure buffer for any future plotting
 
 
-def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, save: bool = True):
+def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, activation_name: str, save: bool = True):
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set(xlim=(-2.0, 2.0), ylim=(-2.0, 2.0))
     first_sample = samples[0].detach().cpu().numpy().T
@@ -161,7 +163,8 @@ def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, save
     anim = animation.FuncAnimation(fig, animate, interval=100, frames=len(samples) - 1)
     if save:
         if noise_model_name == "basic_discrete_time":
-            outfile_name = f"animation_noise_model_{noise_model_name}_with_time_emb_{str(with_time_emb)}.gif"
+            outfile_name = (f"animation_noise_model_{noise_model_name}_activation_{activation_name}"
+                            f"_with_time_emb_{str(with_time_emb)}.gif")
         elif noise_model_name == "naive_nn":
             outfile_name = f"animation_noise_model_{noise_model_name}.gif"
         else:
@@ -175,6 +178,7 @@ def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, save
 def main(
         noise_model_name: str,
         with_time_emb: bool = True,  # this parma is not effective for all noise-models
+        activation_name: str = "GELU",
         time_steps: int = 100,
         hidden_dim_model: int = 128,
         num_layers: int = 2,
@@ -187,10 +191,9 @@ def main(
 ):
     device = torch.device("cuda")
     logger.info("Creating model")
-    noise_model = None
     if noise_model_name == "basic_discrete_time":
         noise_model = BasicDiscreteTimeModel(model_dim=hidden_dim_model, num_resnet_layers=num_layers,
-                                             with_time_emb=with_time_emb).to(device)
+                                             with_time_emb=with_time_emb, activation_name=activation_name).to(device)
     elif noise_model_name == "naive_nn":
         noise_model = NaiveNeuralNetworkNoiseModel(time_steps=time_steps).to(device)
     else:
@@ -210,11 +213,10 @@ def main(
         steps_between_sampling=steps_between_sampling,
         seed=seed,
     )
-
-    path = Path(__file__).parent / "animation.gif"
-
-    animate(samples=result.samples, noise_model_name=noise_model_name, with_time_emb=with_time_emb)
-    plot_metrics(result=result, noise_model_name=noise_model_name, with_time_emb=with_time_emb)
+    animate(samples=result.samples, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
+            activation_name=activation_name)
+    plot_metrics(result=result, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
+                 activation_name=activation_name)
 
 
 if __name__ == "__main__":

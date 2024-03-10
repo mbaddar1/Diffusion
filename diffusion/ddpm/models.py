@@ -6,6 +6,9 @@ import numpy as np
 
 logger = logging.getLogger()
 
+ACTIVATIONS = {"GELU": nn.GELU(), "Tanh": nn.Tanh(), "Sigmoid": nn.Sigmoid(), "ReLU": nn.ReLU(),
+               "Identity": nn.Identity()}
+
 
 class PositionalEncoding(nn.Module):
     """The classic positional encoding from the original Attention papers"""
@@ -69,15 +72,22 @@ class DiscreteTimeResidualBlock(nn.Module):
     """Generic block to learn a nonlinear function f(x, t), where
     t is discrete and x is continuous."""
 
-    def __init__(self, model_dim: int, maxlen: int = 512, with_time_emb: bool = True):
+    def __init__(self, model_dim: int, maxlen: int = 512, with_time_emb: bool = True, activation_name: str = "GELU"):
         super().__init__()
         self.model_dim = model_dim
         self.emb = PositionalEncoding(model_dim=model_dim, maxlen=maxlen)
         self.lin1 = nn.Linear(model_dim, model_dim)
         self.lin2 = nn.Linear(model_dim, model_dim)
         self.norm = nn.LayerNorm(model_dim)
-        self.act = nn.GELU()
+        # What is GELU activation function
+        # 1. https://paperswithcode.com/method/gelu
+        # 2. https://arxiv.org/abs/1606.08415v5
+        assert activation_name in ACTIVATIONS.keys(), f"activation_name param must be one of {ACTIVATIONS.keys()}"
+        self.activation = ACTIVATIONS[activation_name]
         self.with_time_emb = with_time_emb
+
+        logger.info(f"with_time_embedding ? {with_time_emb}")
+        logger.info(f"Activation class instance type : {type(self.activation)}")
 
     def forward(self, x, t):
 
@@ -86,21 +96,23 @@ class DiscreteTimeResidualBlock(nn.Module):
             x_input = x + t_emb
         else:
             x_input = x
-        return self.norm(x + self.lin2(self.act(self.lin1(x_input))))
+        return self.norm(x + self.lin2(self.activation(self.lin1(x_input))))
 
 
 class BasicDiscreteTimeModel(nn.Module):
-    def __init__(self, model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2, with_time_emb: bool = True):
+    def __init__(self, model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2, with_time_emb: bool = True,
+                 activation_name="GELU"):
         super().__init__()
         self.model_dim = model_dim
         self.n_layers = num_resnet_layers
         self.lin_in = nn.Linear(data_dim, model_dim)
         self.lin_out = nn.Linear(model_dim, data_dim)
         self.blocks = nn.ModuleList(
-            [DiscreteTimeResidualBlock(model_dim=model_dim, with_time_emb=with_time_emb) for _ in
+            [DiscreteTimeResidualBlock(model_dim=model_dim, with_time_emb=with_time_emb,
+                                       activation_name=activation_name)
+             for _ in
              range(num_resnet_layers)]
         )
-        logger.info(f"with_time_embedding ? {with_time_emb}")
 
     def forward(self, x, t):
         x = self.lin_in(x)

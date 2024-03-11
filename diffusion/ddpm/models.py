@@ -1,13 +1,12 @@
 import logging
-
 import torch
 from torch import nn
 import numpy as np
 
 logger = logging.getLogger()
-
 ACTIVATIONS = {"GELU": nn.GELU(), "Tanh": nn.Tanh(), "Sigmoid": nn.Sigmoid(), "ReLU": nn.ReLU(),
                "Identity": nn.Identity()}
+EPS = 1e-6
 
 
 class PositionalEncoding(nn.Module):
@@ -74,7 +73,7 @@ class DiscreteTimeBlock(nn.Module):
     BLOCK_ARCHS = ["resnet", "feedforward"]
 
     def __init__(self, model_dim: int, maxlen: int = 512, with_time_emb: bool = True, activation_name: str = "GELU",
-                 block_arch: str = "resnet"):
+                 block_arch: str = "resnet", normalize_output: bool = True):
         super().__init__()
         self.model_dim = model_dim
         self.with_time_emb = with_time_emb
@@ -82,8 +81,8 @@ class DiscreteTimeBlock(nn.Module):
         self.emb = PositionalEncoding(model_dim=model_dim, maxlen=maxlen)
         lin1 = nn.Linear(model_dim, model_dim)
         lin2 = nn.Linear(model_dim, model_dim)
-        self.norm = nn.LayerNorm(model_dim)
-
+        self.norm = nn.LayerNorm(model_dim) if normalize_output else nn.Identity()
+        self.normalize_output = normalize_output
         # What is GELU activation function
         # 1. https://paperswithcode.com/method/gelu
         # 2. https://arxiv.org/abs/1606.08415v5
@@ -98,20 +97,28 @@ class DiscreteTimeBlock(nn.Module):
         logger.info(f"block_arch : {block_arch}")
         logger.info(f"With_time_embedding ? {with_time_emb}")
         logger.info(f"Activation class instance type : {type(activation)}")
+        logger.info(f"Normalize output : {normalize_output}")
 
     def forward(self, x, t):
-
         if self.with_time_emb:
             t_emb = self.emb(t)
             x_input = x + t_emb
         else:
             x_input = x
         if self.block_arch == "resnet":
-            # x_out = self.norm(x + self.lin2(self.activation(self.lin1(x_input))))
-            x_out = self.norm(x + self.model(x_input))
+            x_out_raw = x + self.model(x_input)
+            x_out = self.norm(x_out_raw)
+            # FIXME, this line is for asserting the behavior of the nn.identity() module as a norm layer
+            #   To remove later
+            if not self.normalize_output:
+                assert torch.norm(x_out - x_out_raw).item() <= EPS
         elif self.block_arch == "feedforward":
-            # x_out = self.norm(self.lin2(self.activation(self.lin1(x_input))))
-            x_out = self.norm(self.model(x_input))
+            x_out_raw = self.model(x_input)
+            x_out = self.norm(x_out_raw)
+            # FIXME, this line is for asserting the behavior of the nn.identity() module as a norm layer
+            #   To remove later
+            if not self.normalize_output:
+                assert torch.norm(x_out - x_out_raw).item() <= EPS
         else:
             raise ValueError(f"Unknown block_arch : {self.block_arch}, must be one of {DiscreteTimeBlock.BLOCK_ARCHS}")
         return x_out
@@ -119,7 +126,7 @@ class DiscreteTimeBlock(nn.Module):
 
 class BasicDiscreteTimeModel(nn.Module):
     def __init__(self, model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2, with_time_emb: bool = True,
-                 activation_name="GELU", block_arch: str = "resnet"):
+                 activation_name="GELU", block_arch: str = "resnet", normalize_output: bool = True):
         """
         Setting defaults based on the original code
         https://github.com/Jmkernes/Diffusion/blob/main/diffusion/ddpm/models.py#L64
@@ -132,7 +139,8 @@ class BasicDiscreteTimeModel(nn.Module):
         self.lin_out = nn.Linear(model_dim, data_dim)
         self.blocks = nn.ModuleList(
             [DiscreteTimeBlock(model_dim=model_dim, with_time_emb=with_time_emb,
-                               activation_name=activation_name, block_arch=block_arch)
+                               activation_name=activation_name, block_arch=block_arch,
+                               normalize_output=normalize_output)
              for _ in
              range(num_resnet_layers)]
         )

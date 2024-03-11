@@ -105,7 +105,8 @@ def train(
                        sinkhorn_values=sinkhorn_values)
 
 
-def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool, activation_name: str):
+def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool, activation_name: str,
+                 block_arch: str):
     # plot losses
 
     x = list(range(len(result.ema_losses)))
@@ -115,7 +116,7 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
     plt.plot(x, np.log(result.ema_losses))
 
     if noise_model_name == "basic_discrete_time":
-        outfile_name = (f"iter_loss_noise_model_{noise_model_name}_activation_{activation_name}"
+        outfile_name = (f"iter_loss_noise_model_{noise_model_name}_arch_{block_arch}_activation_{activation_name}"
                         f"_with_time_emb_{with_time_emb}.png")
     elif noise_model_name == "naive_nn":
         outfile_name = f"iter_loss_noise_model_{noise_model_name}.png"
@@ -139,7 +140,7 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
     plt.grid()
 
     if noise_model_name == "basic_discrete_time":
-        outfile_name = (f"iter_sinkhorn_noise_model_{noise_model_name}_activation_"
+        outfile_name = (f"iter_sinkhorn_noise_model_{noise_model_name}_arch_{block_arch}_activation_"
                         f"{activation_name}_with_time_emb_{with_time_emb}.png")
     elif noise_model_name == "naive_nn":
         outfile_name = f"iter_sinkhorn_noise_model_{noise_model_name}.png"
@@ -149,7 +150,8 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
     plt.clf()  # clearing figure buffer for any future plotting
 
 
-def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, activation_name: str, save: bool = True):
+def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, activation_name: str, block_arch: str,
+            save: bool = True):
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set(xlim=(-2.0, 2.0), ylim=(-2.0, 2.0))
     first_sample = samples[0].detach().cpu().numpy().T
@@ -163,7 +165,7 @@ def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, acti
     anim = animation.FuncAnimation(fig, animate, interval=100, frames=len(samples) - 1)
     if save:
         if noise_model_name == "basic_discrete_time":
-            outfile_name = (f"animation_noise_model_{noise_model_name}_activation_{activation_name}"
+            outfile_name = (f"animation_noise_model_{noise_model_name}_arch_{block_arch}_activation_{activation_name}"
                             f"_with_time_emb_{str(with_time_emb)}.gif")
         elif noise_model_name == "naive_nn":
             outfile_name = f"animation_noise_model_{noise_model_name}.gif"
@@ -177,8 +179,9 @@ def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, acti
 
 def main(
         noise_model_name: str,
-        with_time_emb: bool = True,  # this parma is not effective for all noise-models
+        with_time_emb: bool = True,
         activation_name: str = "GELU",
+        block_arch: str = "resnet",
         time_steps: int = 100,
         hidden_dim_model: int = 128,
         num_layers: int = 2,
@@ -193,7 +196,8 @@ def main(
     logger.info("Creating model")
     if noise_model_name == "basic_discrete_time":
         noise_model = BasicDiscreteTimeModel(model_dim=hidden_dim_model, num_resnet_layers=num_layers,
-                                             with_time_emb=with_time_emb, activation_name=activation_name).to(device)
+                                             with_time_emb=with_time_emb, activation_name=activation_name,
+                                             block_arch=block_arch).to(device)
     elif noise_model_name == "naive_nn":
         noise_model = NaiveNeuralNetworkNoiseModel(time_steps=time_steps).to(device)
     else:
@@ -214,9 +218,9 @@ def main(
         seed=seed,
     )
     animate(samples=result.samples, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
-            activation_name=activation_name)
+            activation_name=activation_name, block_arch=block_arch)
     plot_metrics(result=result, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
-                 activation_name=activation_name)
+                 activation_name=activation_name, block_arch=block_arch)
 
 
 if __name__ == "__main__":

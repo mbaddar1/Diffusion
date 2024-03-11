@@ -68,26 +68,36 @@ class GaussianFourierProjection(nn.Module):
         return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
 
 
-class DiscreteTimeResidualBlock(nn.Module):
+class DiscreteTimeBlock(nn.Module):
     """Generic block to learn a nonlinear function f(x, t), where
     t is discrete and x is continuous."""
+    BLOCK_ARCHS = ["resnet", "feedforward"]
 
-    def __init__(self, model_dim: int, maxlen: int = 512, with_time_emb: bool = True, activation_name: str = "GELU"):
+    def __init__(self, model_dim: int, maxlen: int = 512, with_time_emb: bool = True, activation_name: str = "GELU",
+                 block_arch: str = "resnet"):
         super().__init__()
         self.model_dim = model_dim
+        self.with_time_emb = with_time_emb
+
         self.emb = PositionalEncoding(model_dim=model_dim, maxlen=maxlen)
-        self.lin1 = nn.Linear(model_dim, model_dim)
-        self.lin2 = nn.Linear(model_dim, model_dim)
+        lin1 = nn.Linear(model_dim, model_dim)
+        lin2 = nn.Linear(model_dim, model_dim)
         self.norm = nn.LayerNorm(model_dim)
+
         # What is GELU activation function
         # 1. https://paperswithcode.com/method/gelu
         # 2. https://arxiv.org/abs/1606.08415v5
         assert activation_name in ACTIVATIONS.keys(), f"activation_name param must be one of {ACTIVATIONS.keys()}"
-        self.activation = ACTIVATIONS[activation_name]
-        self.with_time_emb = with_time_emb
+        activation = ACTIVATIONS[activation_name]
+        self.model = nn.Sequential(lin1, activation, lin2)
 
-        logger.info(f"with_time_embedding ? {with_time_emb}")
-        logger.info(f"Activation class instance type : {type(self.activation)}")
+        # block_arch doesn't affect the __init__() method , but only how the model is applied, i.e., the forward method
+        assert block_arch in DiscreteTimeBlock.BLOCK_ARCHS, f"block_arch must be one of {DiscreteTimeBlock.BLOCK_ARCHS}"
+        self.block_arch = block_arch
+
+        logger.info(f"block_arch : {block_arch}")
+        logger.info(f"With_time_embedding ? {with_time_emb}")
+        logger.info(f"Activation class instance type : {type(activation)}")
 
     def forward(self, x, t):
 
@@ -96,20 +106,33 @@ class DiscreteTimeResidualBlock(nn.Module):
             x_input = x + t_emb
         else:
             x_input = x
-        return self.norm(x + self.lin2(self.activation(self.lin1(x_input))))
+        if self.block_arch == "resnet":
+            # x_out = self.norm(x + self.lin2(self.activation(self.lin1(x_input))))
+            x_out = self.norm(x + self.model(x_input))
+        elif self.block_arch == "feedforward":
+            # x_out = self.norm(self.lin2(self.activation(self.lin1(x_input))))
+            x_out = self.norm(self.model(x_input))
+        else:
+            raise ValueError(f"Unknown block_arch : {self.block_arch}, must be one of {DiscreteTimeBlock.BLOCK_ARCHS}")
+        return x_out
 
 
 class BasicDiscreteTimeModel(nn.Module):
     def __init__(self, model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2, with_time_emb: bool = True,
-                 activation_name="GELU"):
+                 activation_name="GELU", block_arch: str = "resnet"):
+        """
+        Setting defaults based on the original code
+        https://github.com/Jmkernes/Diffusion/blob/main/diffusion/ddpm/models.py#L64
+        https://github.com/Jmkernes/Diffusion/blob/main/diffusion/ddpm/models.py#L81
+        """
         super().__init__()
         self.model_dim = model_dim
         self.n_layers = num_resnet_layers
         self.lin_in = nn.Linear(data_dim, model_dim)
         self.lin_out = nn.Linear(model_dim, data_dim)
         self.blocks = nn.ModuleList(
-            [DiscreteTimeResidualBlock(model_dim=model_dim, with_time_emb=with_time_emb,
-                                       activation_name=activation_name)
+            [DiscreteTimeBlock(model_dim=model_dim, with_time_emb=with_time_emb,
+                               activation_name=activation_name, block_arch=block_arch)
              for _ in
              range(num_resnet_layers)]
         )

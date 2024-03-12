@@ -77,12 +77,6 @@ class DiscreteTimeBlock(nn.Module):
         super().__init__()
         self.model_dim = model_dim
         self.with_time_emb = with_time_emb
-
-        self.emb = PositionalEncoding(model_dim=model_dim, maxlen=maxlen)
-        # FIXME a piece of code to double-check if time-embedding model has any trainable parameters
-        assert (len(list(
-            self.emb.parameters())) == 0), "The time-embedding model is assumed to have no-trainable parameters"
-
         lin1 = nn.Linear(model_dim, model_dim)
         lin2 = nn.Linear(model_dim, model_dim)
         self.norm = nn.LayerNorm(model_dim) if normalize_output else nn.Identity()
@@ -148,6 +142,10 @@ class BasicDiscreteTimeModel(nn.Module):
              range(num_resnet_layers)]
         )
         self.time_embed_model = PositionalEncoding(model_dim=model_dim)
+
+        # FIXME a piece of code to double-check if time-embedding model has any trainable parameters
+        assert (len(list(
+            self.time_embed_model.parameters())) == 0), "The time-embedding model is assumed to have no-trainable parameters"
 
     def forward(self, x, t):
         time_embedding = self.time_embed_model(t)

@@ -103,9 +103,8 @@ class DiscreteTimeBlock(nn.Module):
         logger.info(f"Activation class instance type : {type(activation)}")
         logger.info(f"Normalize output : {normalize_output}")
 
-    def forward(self, x, t):
+    def forward(self, x, t_emb):
         if self.with_time_emb:
-            t_emb = self.emb(t)
             x_input = x + t_emb
         else:
             x_input = x
@@ -148,11 +147,13 @@ class BasicDiscreteTimeModel(nn.Module):
              for _ in
              range(num_resnet_layers)]
         )
+        self.time_embed_model = PositionalEncoding(model_dim=model_dim)
 
     def forward(self, x, t):
+        time_embedding = self.time_embed_model(t)
         x = self.lin_in(x)
         for block in self.blocks:
-            x = block(x, t)
+            x = block(x, time_embedding)
         return self.lin_out(x)
 
 

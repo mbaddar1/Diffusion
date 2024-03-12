@@ -73,6 +73,9 @@ class DiscreteTimeResidualBlock(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.emb = PositionalEncoding(d_model=d_model, maxlen=maxlen)
+        # FIXME a piece of code to double-check if time-embedding model has any trainable parameters
+        assert (len(list(
+            self.emb.parameters())) == 0), "The time-embedding model is assumed to have no-trainable parameters"
         self.lin1 = nn.Linear(d_model, d_model)
         self.lin2 = nn.Linear(d_model, d_model)
         self.norm = nn.LayerNorm(d_model)

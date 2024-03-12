@@ -105,14 +105,24 @@ def train(
                        sinkhorn_values=sinkhorn_values)
 
 
-def plot_metrics(result: TrainResult, noise_model_name: str):
+def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool, activation_name: str,
+                 block_arch: str, normalize_output: bool):
     # plot losses
+
     x = list(range(len(result.ema_losses)))
     plt.xlabel("Iterations")
     plt.ylabel("EMA loss - Log scale")
     plt.title("Loss-Iterations curve")
     plt.plot(x, np.log(result.ema_losses))
-    plt.savefig(f"iter_loss_noise_model_{noise_model_name}.png")
+
+    if noise_model_name == "basic_discrete_time":
+        outfile_name = (f"iter_loss_noise_model_{noise_model_name}_arch_{block_arch}_activation_{activation_name}"
+                        f"_with_time_emb_{with_time_emb}_normalize_output_{normalize_output}.png")
+    elif noise_model_name == "naive_nn":
+        outfile_name = f"iter_loss_noise_model_{noise_model_name}.png"
+    else:
+        raise ValueError(f"Unknown noise_model_name : {noise_model_name}")
+    plt.savefig(outfile_name)
 
     plt.clf()
 
@@ -123,16 +133,25 @@ def plot_metrics(result: TrainResult, noise_model_name: str):
     max_log_y = np.maximum(max(np.log(y1)), max(np.log(y2)))
     plt.plot(x, np.log(y1), '--', label="Benchmark")
     plt.plot(x, np.log(y2), '-', label="Model values")
-    # plt.yticks(list(np.arange(0, max_log_y + 1, 0.05)))
-    plt.xlabel("iterations")
+    plt.yticks(list(np.arange(-3.0, 1.0, 0.25)))
+    plt.xlabel("Iterations")
     plt.ylabel("Sinkhorn Values - Log Scale")
     plt.legend(loc="upper right")
     plt.grid()
-    plt.savefig(f"iter_sinkhorn_noise_model_{noise_model_name}.png")
+
+    if noise_model_name == "basic_discrete_time":
+        outfile_name = (f"iter_sinkhorn_noise_model_{noise_model_name}_arch_{block_arch}_activation_"
+                        f"{activation_name}_with_time_emb_{with_time_emb}_normalize_output_{normalize_output}.png")
+    elif noise_model_name == "naive_nn":
+        outfile_name = f"iter_sinkhorn_noise_model_{noise_model_name}.png"
+    else:
+        raise ValueError(f"Unknown noise_model_name : {noise_model_name}")
+    plt.savefig(outfile_name)
     plt.clf()  # clearing figure buffer for any future plotting
 
 
-def animate(samples: List[Any], noise_model_name: str, save: bool = True):
+def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, activation_name: str, block_arch: str,
+            save: bool = True, normalize_output: bool = True):
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set(xlim=(-2.0, 2.0), ylim=(-2.0, 2.0))
     first_sample = samples[0].detach().cpu().numpy().T
@@ -142,15 +161,28 @@ def animate(samples: List[Any], noise_model_name: str, save: bool = True):
         offsets = samples[i].detach().cpu().numpy()
         scat.set_offsets(offsets)
 
+    logger.info(f"Generating animation file...")
     anim = animation.FuncAnimation(fig, animate, interval=100, frames=len(samples) - 1)
     if save:
-        anim.save(filename=f"animation_noise_model_{noise_model_name}.gif", writer=animation.PillowWriter(fps=5))
+        if noise_model_name == "basic_discrete_time":
+            outfile_name = (f"animation_noise_model_{noise_model_name}_arch_{block_arch}_activation_{activation_name}"
+                            f"_with_time_emb_{str(with_time_emb)}_normalize_output_{normalize_output}.gif")
+        elif noise_model_name == "naive_nn":
+            outfile_name = f"animation_noise_model_{noise_model_name}_normalize_output_{normalize_output}.gif"
+        else:
+            raise ValueError(f"Unknown noise_model_name : {noise_model_name}")
+        logger.info(f"Saving animation to file : {outfile_name}")
+        anim.save(filename=outfile_name, writer=animation.PillowWriter(fps=5))
     plt.clf()
     return anim
 
 
 def main(
-        noise_model_name: str,
+        noise_model_name: str = "basic_discrete_time",
+        normalize_output: bool = True,
+        with_time_emb: bool = True,
+        activation_name: str = "GELU",
+        block_arch: str = "resnet",
         time_steps: int = 100,
         hidden_dim_model: int = 128,
         num_layers: int = 2,
@@ -159,12 +191,16 @@ def main(
         sample_size: int = 512,
         steps_between_sampling: int = 50,
         seed: int = 42,
+
 ):
+    # All defaults for params are based on the original ddpm code here
+    # https://github.com/Jmkernes/Diffusion
     device = torch.device("cuda")
     logger.info("Creating model")
-    noise_model = None
     if noise_model_name == "basic_discrete_time":
-        noise_model = BasicDiscreteTimeModel(hidden_model_dim=hidden_dim_model, num_resnet_layers=num_layers).to(device)
+        noise_model = BasicDiscreteTimeModel(model_dim=hidden_dim_model, num_resnet_layers=num_layers,
+                                             with_time_emb=with_time_emb, activation_name=activation_name,
+                                             block_arch=block_arch, normalize_output=normalize_output).to(device)
     elif noise_model_name == "naive_nn":
         noise_model = NaiveNeuralNetworkNoiseModel(time_steps=time_steps).to(device)
     else:
@@ -184,11 +220,10 @@ def main(
         steps_between_sampling=steps_between_sampling,
         seed=seed,
     )
-
-    path = Path(__file__).parent / "animation.gif"
-    logger.info(f"Animating and saving to {path}")
-    animate(samples=result.samples, noise_model_name=noise_model_name)
-    plot_metrics(result=result, noise_model_name=noise_model_name)
+    animate(samples=result.samples, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
+            activation_name=activation_name, block_arch=block_arch, normalize_output=normalize_output)
+    plot_metrics(result=result, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
+                 activation_name=activation_name, block_arch=block_arch, normalize_output=normalize_output)
 
 
 if __name__ == "__main__":

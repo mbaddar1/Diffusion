@@ -79,6 +79,10 @@ class DiscreteTimeBlock(nn.Module):
         self.with_time_emb = with_time_emb
 
         self.emb = PositionalEncoding(model_dim=model_dim, maxlen=maxlen)
+        # FIXME a piece of code to double-check if time-embedding model has any trainable parameters
+        assert (len(list(
+            self.emb.parameters())) == 0), "The time-embedding model is assumed to have no-trainable parameters"
+
         lin1 = nn.Linear(model_dim, model_dim)
         lin2 = nn.Linear(model_dim, model_dim)
         self.norm = nn.LayerNorm(model_dim) if normalize_output else nn.Identity()

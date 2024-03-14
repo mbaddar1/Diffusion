@@ -80,7 +80,11 @@ class DiscreteTimeBlock(nn.Module):
         self.with_time_emb = with_time_emb
         lin1 = nn.Linear(model_dim, model_dim)
         lin2 = nn.Linear(model_dim, model_dim)
-        self.norm = nn.LayerNorm(model_dim) if normalize_output else nn.Identity()
+        # We can set the elementwise_affine bool param to true or false to control whether the LayerNorm has learnable
+        # Parameters
+        # See doc.
+        # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
+        self.norm = nn.LayerNorm(model_dim, elementwise_affine=False) if normalize_output else nn.Identity()
         self.normalize_output = normalize_output
         # What is GELU activation function
         # 1. https://paperswithcode.com/method/gelu
@@ -146,7 +150,8 @@ class BasicDiscreteTimeModel(nn.Module):
 
         # FIXME a piece of code to double-check if time-embedding model has any trainable parameters
         assert (len(list(
-            self.time_embed_model.parameters())) == 0), "The time-embedding model is assumed to have no-trainable parameters"
+            self.time_embed_model.parameters())) == 0), \
+            "The time-embedding model is assumed to have no-trainable parameters"
 
     def forward(self, x, t):
         time_embedding = self.time_embed_model(t)

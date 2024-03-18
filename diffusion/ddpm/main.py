@@ -190,8 +190,7 @@ def main(
         n_epochs: int = 1000,
         sample_size: int = 512,
         steps_between_sampling: int = 50,
-        seed: int = 42,
-
+        seed: int = 42
 ):
     # All defaults for params are based on the original ddpm code here
     # https://github.com/Jmkernes/Diffusion

@@ -84,7 +84,7 @@ class DiscreteTimeBlock(nn.Module):
         # Parameters
         # See doc.
         # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
-        self.norm = nn.LayerNorm(model_dim, elementwise_affine=False) if normalize_output else nn.Identity()
+        self.norm = nn.LayerNorm(model_dim, elementwise_affine=True) if normalize_output else nn.Identity()
         self.normalize_output = normalize_output
         # What is GELU activation function
         # 1. https://paperswithcode.com/method/gelu

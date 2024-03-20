@@ -106,7 +106,7 @@ def train(
 
 
 def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool, activation_name: str,
-                 block_arch: str, normalize_output: bool):
+                 block_arch: str, normalize_output: bool, time_embedding_combination_method: str):
     # plot losses
 
     x = list(range(len(result.ema_losses)))
@@ -116,8 +116,9 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
     plt.plot(x, np.log(result.ema_losses))
 
     if noise_model_name == "basic_discrete_time":
-        outfile_name = (f"iter_loss_noise_model_{noise_model_name}_arch_{block_arch}_activation_{activation_name}"
-                        f"_with_time_emb_{with_time_emb}_normalize_output_{normalize_output}.png")
+        outfile_name = (f"iter_loss_noise_model_{noise_model_name}_arch_{block_arch}_activation_{activation_name}_"
+                        f"with_time_emb_{with_time_emb}_normalize_output_{normalize_output}_"
+                        f"time_embedding_combination_{time_embedding_combination_method}.png")
     elif noise_model_name == "naive_nn":
         outfile_name = f"iter_loss_noise_model_{noise_model_name}.png"
     else:
@@ -141,7 +142,8 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
 
     if noise_model_name == "basic_discrete_time":
         outfile_name = (f"iter_sinkhorn_noise_model_{noise_model_name}_arch_{block_arch}_activation_"
-                        f"{activation_name}_with_time_emb_{with_time_emb}_normalize_output_{normalize_output}.png")
+                        f"{activation_name}_with_time_emb_{with_time_emb}_normalize_output_{normalize_output}_"
+                        f"time_embedding_combination_{time_embedding_combination_method}.png")
     elif noise_model_name == "naive_nn":
         outfile_name = f"iter_sinkhorn_noise_model_{noise_model_name}.png"
     else:
@@ -151,7 +153,7 @@ def plot_metrics(result: TrainResult, noise_model_name: str, with_time_emb: bool
 
 
 def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, activation_name: str, block_arch: str,
-            save: bool = True, normalize_output: bool = True):
+            save: bool = True, normalize_output: bool = True, time_embedding_combination_method: str = "addition"):
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set(xlim=(-2.0, 2.0), ylim=(-2.0, 2.0))
     first_sample = samples[0].detach().cpu().numpy().T
@@ -166,7 +168,8 @@ def animate(samples: List[Any], noise_model_name: str, with_time_emb: bool, acti
     if save:
         if noise_model_name == "basic_discrete_time":
             outfile_name = (f"animation_noise_model_{noise_model_name}_arch_{block_arch}_activation_{activation_name}"
-                            f"_with_time_emb_{str(with_time_emb)}_normalize_output_{normalize_output}.gif")
+                            f"_with_time_emb_{str(with_time_emb)}_normalize_output_{normalize_output}_"
+                            f"time_embedding_combination_{time_embedding_combination_method}.gif")
         elif noise_model_name == "naive_nn":
             outfile_name = f"animation_noise_model_{noise_model_name}_normalize_output_{normalize_output}.gif"
         else:
@@ -181,10 +184,12 @@ def main(
         noise_model_name: str = "basic_discrete_time",
         normalize_output: bool = True,
         with_time_emb: bool = True,
+        time_embedding_combination_method="addition",
         activation_name: str = "GELU",
         block_arch: str = "resnet",
         time_steps: int = 100,
         hidden_dim_model: int = 128,
+        time_embedding_dim: int = 128,
         num_layers: int = 2,
         batch_size: int = 128,
         n_epochs: int = 1000,
@@ -197,9 +202,12 @@ def main(
     device = torch.device("cuda")
     logger.info("Creating model")
     if noise_model_name == "basic_discrete_time":
-        noise_model = BasicDiscreteTimeModel(model_dim=hidden_dim_model, num_resnet_layers=num_layers,
-                                             with_time_emb=with_time_emb, activation_name=activation_name,
-                                             block_arch=block_arch, normalize_output=normalize_output).to(device)
+        noise_model = (BasicDiscreteTimeModel(model_dim=hidden_dim_model, num_resnet_layers=num_layers,
+                                              with_time_emb=with_time_emb, activation_name=activation_name,
+                                              block_arch=block_arch, normalize_output=normalize_output,
+                                              time_embedding_dim=time_embedding_dim,
+                                              time_embedding_combination_method=time_embedding_combination_method).
+                       to(device))
     elif noise_model_name == "naive_nn":
         noise_model = NaiveNeuralNetworkNoiseModel(time_steps=time_steps).to(device)
     else:
@@ -220,9 +228,11 @@ def main(
         seed=seed,
     )
     animate(samples=result.samples, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
-            activation_name=activation_name, block_arch=block_arch, normalize_output=normalize_output)
+            activation_name=activation_name, block_arch=block_arch, normalize_output=normalize_output,
+            time_embedding_combination_method=time_embedding_combination_method)
     plot_metrics(result=result, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
-                 activation_name=activation_name, block_arch=block_arch, normalize_output=normalize_output)
+                 activation_name=activation_name, block_arch=block_arch, normalize_output=normalize_output,
+                 time_embedding_combination_method=time_embedding_combination_method)
 
 
 if __name__ == "__main__":

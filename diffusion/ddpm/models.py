@@ -72,14 +72,24 @@ class DiscreteTimeBlock(nn.Module):
     t is discrete and x is continuous."""
     BLOCK_ARCHS = ["resnet", "feedforward"]
 
-    def __init__(self, model_dim: int, maxlen: int = 512, with_time_emb: bool = True, activation_name: str = "GELU",
-                 block_arch: str = "resnet", normalize_output: bool = True):
+    def __init__(self, model_dim: int, time_embedding_dim: int, time_embedding_combination_method: str,
+                 with_time_emb: bool = True, activation_name: str = "GELU", block_arch: str = "resnet",
+                 normalize_output: bool = True):
         super().__init__()
 
         self.model_dim = model_dim
         self.with_time_emb = with_time_emb
-        lin1 = nn.Linear(model_dim, model_dim)
+        if time_embedding_combination_method == "addition":
+            assert time_embedding_dim == model_dim, (f"if time_embedding_combination_method == addition ,"
+                                                     f"then model_dim must be equal to time_embedding_dim : "
+                                                     f"{time_embedding_dim}!={model_dim}")
+            lin1 = nn.Linear(model_dim, model_dim)
+        elif time_embedding_combination_method == "augmentation":
+            lin1 = nn.Linear(time_embedding_dim + model_dim, model_dim)
+        else:
+            raise ValueError(f"Unknown time_embedding_combination_method : {time_embedding_combination_method}")
         lin2 = nn.Linear(model_dim, model_dim)
+        self.time_embedding_combination_method = time_embedding_combination_method
         # We can set the elementwise_affine bool param to true or false to control whether the LayerNorm has learnable
         # Parameters
         # See doc.
@@ -104,7 +114,12 @@ class DiscreteTimeBlock(nn.Module):
 
     def forward(self, x, t_emb):
         if self.with_time_emb:
-            x_input = x + t_emb
+            if self.time_embedding_combination_method == "addition":
+                x_input = x + t_emb
+            elif self.time_embedding_combination_method == "augmentation":
+                x_input = torch.cat([x, t_emb], dim=1)
+            else:
+                raise ValueError(f"Unknown time_embedding")
         else:
             x_input = x
         if self.block_arch == "resnet":
@@ -128,7 +143,8 @@ class DiscreteTimeBlock(nn.Module):
 
 class BasicDiscreteTimeModel(nn.Module):
     def __init__(self, model_dim: int = 128, data_dim: int = 2, num_resnet_layers: int = 2, with_time_emb: bool = True,
-                 activation_name="GELU", block_arch: str = "resnet", normalize_output: bool = True):
+                 activation_name="GELU", block_arch: str = "resnet", normalize_output: bool = True,
+                 time_embedding_dim: int = 128, time_embedding_combination_method: str = "addition"):
         """
         Setting defaults based on the original code
         https://github.com/Jmkernes/Diffusion/blob/main/diffusion/ddpm/models.py#L64
@@ -142,11 +158,12 @@ class BasicDiscreteTimeModel(nn.Module):
         self.blocks = nn.ModuleList(
             [DiscreteTimeBlock(model_dim=model_dim, with_time_emb=with_time_emb,
                                activation_name=activation_name, block_arch=block_arch,
-                               normalize_output=normalize_output)
+                               normalize_output=normalize_output, time_embedding_dim=time_embedding_dim,
+                               time_embedding_combination_method=time_embedding_combination_method)
              for _ in
              range(num_resnet_layers)]
         )
-        self.time_embed_model = PositionalEncoding(model_dim=model_dim)
+        self.time_embed_model = PositionalEncoding(model_dim=time_embedding_dim)
 
         # FIXME a piece of code to double-check if time-embedding model has any trainable parameters
         assert (len(list(

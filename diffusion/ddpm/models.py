@@ -189,6 +189,14 @@ class BasicDiscreteTimeModel(nn.Module):
         assert (len(list(
             self.time_embed_model.parameters())) == 0), \
             "The time-embedding model is assumed to have no-trainable parameters"
+        # get number of scalar elements
+        self.n_scalar = 0
+        for param in self.parameters():
+            self.n_scalar += torch.numel(param)
+        logger.info(f"Model n_scalar = {self.n_scalar}")
+
+    def get_n_scalar(self):
+        return self.n_scalar
 
     def forward(self, x, t):
         time_embedding = self.time_embed_model(t)

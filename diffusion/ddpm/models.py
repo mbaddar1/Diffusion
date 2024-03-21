@@ -1,4 +1,6 @@
 import logging
+from typing import Tuple, Sequence
+
 import torch
 from torch import nn
 import numpy as np
@@ -67,6 +69,16 @@ class GaussianFourierProjection(nn.Module):
         return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
 
 
+class TensorOrderThree(nn.Module):
+    def __init__(self, time_emb_dim: int, latent_dim: int, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.param_tensor = nn.Parameter(torch.randn([time_emb_dim, latent_dim, latent_dim]))
+
+    def forward(self, x: torch.Tensor, t_emb: torch.Tensor):
+        out = torch.einsum("bi,bj,ijk->bk", x, t_emb, self.param_tensor)
+        return out
+
+
 class DiscreteTimeBlock(nn.Module):
     """Generic block to learn a nonlinear function f(x, t), where
     t is discrete and x is continuous."""
@@ -83,12 +95,14 @@ class DiscreteTimeBlock(nn.Module):
             assert time_embedding_dim == model_dim, (f"if time_embedding_combination_method == addition ,"
                                                      f"then model_dim must be equal to time_embedding_dim : "
                                                      f"{time_embedding_dim}!={model_dim}")
-            lin1 = nn.Linear(model_dim, model_dim)
+            self.lin1 = nn.Linear(model_dim, model_dim)
         elif time_embedding_combination_method == "augmentation":
-            lin1 = nn.Linear(time_embedding_dim + model_dim, model_dim)
+            self.lin1 = nn.Linear(time_embedding_dim + model_dim, model_dim)
+        elif time_embedding_combination_method == "tensor":
+            self.lin1 = TensorOrderThree(time_emb_dim=time_embedding_dim, latent_dim=model_dim)
         else:
             raise ValueError(f"Unknown time_embedding_combination_method : {time_embedding_combination_method}")
-        lin2 = nn.Linear(model_dim, model_dim)
+        self.lin2 = nn.Linear(model_dim, model_dim)
         self.time_embedding_combination_method = time_embedding_combination_method
         # We can set the elementwise_affine bool param to true or false to control whether the LayerNorm has learnable
         # Parameters
@@ -100,8 +114,8 @@ class DiscreteTimeBlock(nn.Module):
         # 1. https://paperswithcode.com/method/gelu
         # 2. https://arxiv.org/abs/1606.08415v5
         assert activation_name in ACTIVATIONS.keys(), f"activation_name param must be one of {ACTIVATIONS.keys()}"
-        activation = ACTIVATIONS[activation_name]
-        self.model = nn.Sequential(lin1, activation, lin2)
+        self.activation = ACTIVATIONS[activation_name]
+        self.model = nn.Sequential(self.lin1, self.activation, self.lin2)
 
         # block_arch doesn't affect the __init__() method , but only how the model is applied, i.e., the forward method
         assert block_arch in DiscreteTimeBlock.BLOCK_ARCHS, f"block_arch must be one of {DiscreteTimeBlock.BLOCK_ARCHS}"
@@ -109,7 +123,7 @@ class DiscreteTimeBlock(nn.Module):
 
         logger.info(f"block_arch : {block_arch}")
         logger.info(f"With_time_embedding ? {with_time_emb}")
-        logger.info(f"Activation class instance type : {type(activation)}")
+        logger.info(f"Activation class instance type : {type(self.activation)}")
         logger.info(f"Normalize output : {normalize_output}")
 
     def forward(self, x, t_emb):
@@ -118,6 +132,12 @@ class DiscreteTimeBlock(nn.Module):
                 x_input = x + t_emb
             elif self.time_embedding_combination_method == "augmentation":
                 x_input = torch.cat([x, t_emb], dim=1)
+            elif self.time_embedding_combination_method == "tensor":
+                out1 = self.lin1(t_emb, x)
+                out2 = self.activation(out1)
+                out3 = self.lin2(out2)
+                out4 = self.norm(out3)
+                return out4
             else:
                 raise ValueError(f"Unknown time_embedding")
         else:

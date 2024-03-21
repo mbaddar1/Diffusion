@@ -225,7 +225,7 @@ def main(
         n_epochs=n_epochs,
         sample_size=sample_size,
         steps_between_sampling=steps_between_sampling,
-        seed=seed,
+        seed=seed
     )
     animate(samples=result.samples, noise_model_name=noise_model_name, with_time_emb=with_time_emb,
             activation_name=activation_name, block_arch=block_arch, normalize_output=normalize_output,
